@@ -762,7 +762,7 @@ class Extension:
         # MPlus sometimes joins two chapters as one, upload to md as
         # two different chapters
         for chap_number in chapter_number_split:
-            copied_chapter = copy(chapter)
+            copied_chapter = deepcopy(chapter)
             copied_chapter.chapter_number = chap_number
             copied_chapter.chapter_title = chapter_title
             updated_chapters.append(copied_chapter)
