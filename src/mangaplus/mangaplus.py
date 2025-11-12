@@ -24,7 +24,7 @@ from publoader.webhook import PubloaderWebhook
 
 DEFAULT_TIMESTAMP = 1
 
-__version__ = "0.2.03"
+__version__ = "0.2.04"
 
 setup_extension_logs(
     logger_name="mangaplus",
@@ -223,7 +223,7 @@ class Extension:
     async def _fetch_updates(self, **params) -> Optional[dict]:
         """Get manga and chapter details from the api."""
         return await self._request_api(
-            "web/web_homeV4",
+            "home_v4",
             lang="eng",
             clang="eng,esp,tha,ptb,ind,rus,fra,deu,vie",
             **params,
@@ -301,7 +301,7 @@ class Extension:
         if not fetched_updates:
             return
 
-        updates_response = fetched_updates.get("webHomeViewV4", {})
+        updates_response = fetched_updates.get("homeViewV3", {})
         updated_chapters = updates_response.get("groups", [])
         latest_updates_list_unmerged = updated_chapters[:2]
         latest_updates_list_merged = list(
