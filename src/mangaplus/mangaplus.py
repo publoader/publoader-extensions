@@ -24,7 +24,7 @@ from publoader.webhook import PubloaderWebhook
 
 DEFAULT_TIMESTAMP = 1
 
-__version__ = "0.2.02"
+__version__ = "0.2.03"
 
 setup_extension_logs(
     logger_name="mangaplus",
@@ -438,6 +438,10 @@ class Extension:
 
     async def _chapter_updates(self, mangas: list):
         """Get the updated chapters from each manga."""
+        # for now, an updated chapter should've been uploaded in the past 24 hours
+        time_epoch_now = datetime.now()
+        time_epoch_yesterday = datetime.now() - 86400
+        
         for manga in mangas:
             manga_response = await self._fetch_title_data(manga_id=manga)
             if not manga_response:
@@ -468,8 +472,11 @@ class Extension:
                 chapter
                 for chapter in normalised_chapters
                 if str(chapter.chapter_id) not in self._posted_chapters_ids
-                and chapter.chapter_expire >= datetime.now()
+                and chapter.chapter_expire >= time_epoch_now
+                and chapter.chapter_timestamp >= time_epoch_yesterday
             ]
+            # TODO: time_epoch_yesterday is a hack
+            # consider toggling an unavailable chapter or something (preserves comment threads)
 
             if updated_chapters:
                 logger.info(f"MangaPlus newly updated chapters: {updated_chapters}")
