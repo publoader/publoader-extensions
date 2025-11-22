@@ -440,7 +440,7 @@ class Extension:
         """Get the updated chapters from each manga."""
         # for now, an updated chapter should've been uploaded in the past 24 hours
         time_epoch_now = datetime.now()
-        time_epoch_yesterday = datetime.now() - 86400
+        time_epoch_yesterday = datetime.now() - 259200
         
         for manga in mangas:
             manga_response = await self._fetch_title_data(manga_id=manga)
