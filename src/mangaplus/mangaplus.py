@@ -438,7 +438,7 @@ class Extension:
 
     async def _chapter_updates(self, mangas: list):
         """Get the updated chapters from each manga."""
-        # for now, an updated chapter should've been uploaded in the past 24 hours
+        # for now, an updated chapter should've been uploaded in the past 3 days
         time_epoch_now = datetime.now()
         time_epoch_yesterday = datetime.now() - 259200
         
@@ -475,7 +475,7 @@ class Extension:
                 and chapter.chapter_expire >= time_epoch_now
                 and chapter.chapter_timestamp >= time_epoch_yesterday
             ]
-            # TODO: time_epoch_yesterday is a hack
+            # TODO: time_epoch_yesterday is a bodge
             # consider toggling an unavailable chapter or something (preserves comment threads)
 
             if updated_chapters:
