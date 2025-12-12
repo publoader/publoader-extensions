@@ -4,7 +4,7 @@ import re
 import string
 import traceback
 from copy import deepcopy
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -440,7 +440,7 @@ class Extension:
         """Get the updated chapters from each manga."""
         # for now, an updated chapter should've been uploaded in the past 3 days
         time_epoch_now = datetime.now()
-        time_epoch_yesterday = datetime.now() - 259200
+        time_epoch_three_days_ago = datetime.now() - timedelta(days = 3)
         
         for manga in mangas:
             manga_response = await self._fetch_title_data(manga_id=manga)
@@ -473,9 +473,9 @@ class Extension:
                 for chapter in normalised_chapters
                 if str(chapter.chapter_id) not in self._posted_chapters_ids
                 and chapter.chapter_expire >= time_epoch_now
-                and chapter.chapter_timestamp >= time_epoch_yesterday
+                and chapter.chapter_timestamp >= time_epoch_three_days_ago
             ]
-            # TODO: time_epoch_yesterday is a bodge
+            # TODO: time_epoch_three_days_ago, as may be evident, is a bodge
             # consider toggling an unavailable chapter or something (preserves comment threads)
 
             if updated_chapters:
