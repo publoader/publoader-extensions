@@ -3,6 +3,7 @@ import logging
 import re
 import string
 import traceback
+import uuid
 from copy import deepcopy
 from datetime import datetime, time, timezone, timedelta
 from pathlib import Path
@@ -179,8 +180,13 @@ class Extension:
         if "format" not in params:
             params["format"] = "json"
 
+        headers = {
+            "User-Agent": f"publoader/{__version__} (MangaPlus Extension)",
+            "SESSION-TOKEN": str(uuid.uuid4())
+        }
+
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(headers=headers) as session:
                 async with session.get(
                     self._mplus_base_api_url + path, params=params
                 ) as response:
@@ -223,7 +229,7 @@ class Extension:
     async def _fetch_updates(self, **params) -> Optional[dict]:
         """Get manga and chapter details from the api."""
         return await self._request_api(
-            "home_v4",
+            "web/web_homev4",
             lang="eng",
             clang="eng,esp,tha,ptb,ind,rus,fra,deu,vie",
             **params,
@@ -301,7 +307,7 @@ class Extension:
         if not fetched_updates:
             return
 
-        updates_response = fetched_updates.get("homeViewV3", {})
+        updates_response = fetched_updates.get("webHomeViewV4", {})
         updated_chapters = updates_response.get("groups", [])
         latest_updates_list_unmerged = updated_chapters[:2]
         latest_updates_list_merged = list(
