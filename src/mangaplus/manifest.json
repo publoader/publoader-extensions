@@ -1,0 +1,30 @@
+{
+  "name": "mangaplus",
+  "version": "0.2.04",
+  "publoader_api": "^1.0.0",
+  "entrypoint": "mangaplus.py",
+  "class_name": "Extension",
+  "mangadex_group_id": "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb",
+  "languages": ["en", "es", "fr", "id", "pt-br", "ru", "th", "de", "vi"],
+  "allowed_hosts": [
+    "jumpg-webapi.tokyo-cdn.com",
+    "mangaplus.shueisha.co.jp"
+  ],
+  "permissions": {
+    "network": true,
+    "filesystem_read": ["manga_id_map.json", "override_options.json"],
+    "filesystem_write": [],
+    "subprocess": false
+  },
+  "schedule": {
+    "hour": 15,
+    "minute": 5,
+    "timezone": "UTC"
+  },
+  "data_files": {
+    "manga_id_map": "manga_id_map.json",
+    "override_options": "override_options.json"
+  },
+  "maintainers": ["publoader"],
+  "homepage": "https://mangaplus.shueisha.co.jp/"
+}
