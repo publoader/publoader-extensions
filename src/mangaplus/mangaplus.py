@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
@@ -7,36 +9,54 @@ import uuid
 from copy import deepcopy
 from datetime import datetime, time, timezone, timedelta
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import aiohttp
 import itertools
 import math
 import requests
-from publoader.models.dataclasses import Chapter, Manga
-from publoader.utils.logs import setup_extension_logs
-from publoader.utils.misc import create_new_event_loop, find_key_from_list_value
-from publoader.utils.utils import (
-    chapter_number_regex,
-    open_manga_id_map,
-    open_title_regex,
-)
-from publoader.webhook import PubloaderWebhook
+
+if TYPE_CHECKING:
+    from publoader.models.dataclasses import Chapter, Manga
 
 DEFAULT_TIMESTAMP = 1
 
 __version__ = "0.2.04"
 
-setup_extension_logs(
-    logger_name="mangaplus",
-    logger_filename="mangaplus",
-)
-
 logger = logging.getLogger("mangaplus")
+
+
+def _load_publoader_api() -> None:
+    """Bind publoader.* symbols to module globals.
+
+    Deferred so smoke tests (which don't install publoader) can import this
+    module without resolving the runtime deps. Called from the entrypoint
+    that actually does work.
+    """
+    global Chapter, Manga, create_new_event_loop, find_key_from_list_value
+    global chapter_number_regex, open_manga_id_map, open_title_regex, PubloaderWebhook
+    from publoader.models.dataclasses import Chapter, Manga
+    from publoader.utils.misc import create_new_event_loop, find_key_from_list_value
+    from publoader.utils.utils import (
+        chapter_number_regex,
+        open_manga_id_map,
+        open_title_regex,
+    )
+    from publoader.webhook import PubloaderWebhook
 
 
 class Extension:
     def __init__(self, extension_dirpath: Path, **kwargs):
+        try:
+            from publoader.utils.logs import setup_extension_logs
+        except ModuleNotFoundError:
+            pass
+        else:
+            setup_extension_logs(
+                logger_name="mangaplus",
+                logger_filename="mangaplus",
+            )
+
         self.name = "mangaplus"
         self.mangadex_group_id = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
         self.manga_id_map_filename = "manga_id_map.json"
@@ -44,10 +64,16 @@ class Extension:
         self.extension_dirpath = extension_dirpath
 
         self.fetch_all_chapters = False
-        self._posted_chapters_ids = []
-        self._updated_chapters: List[Chapter] = []
-        self._all_mplus_chapters: List[Chapter] = []
-        self._untracked_manga: List[Manga] = []
+        self._posted_chapters_ids: List[str] = []
+        self._updated_chapters: list = []
+        self._all_mplus_chapters: list = []
+        self._untracked_manga: list = []
+        self.override_options: dict = {}
+        self.tracked_mangadex_ids: list = []
+        self.tracked_manga: list = []
+        self.manga_no_chapters: list = []
+        self._manga_id_map: dict = {}
+        self._num2words: Optional[str] = None
         self._mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com/api/"
         self._chapter_url_format = "https://mangaplus.shueisha.co.jp/viewer/{}"
         self._manga_url_format = "https://mangaplus.shueisha.co.jp/titles/{}"
@@ -87,6 +113,7 @@ class Extension:
     def update_external_data(
         self, posted_chapter_ids: List[str], fetch_all_chapters: bool, **kwargs
     ) -> None:
+        _load_publoader_api()
         self._posted_chapters_ids = posted_chapter_ids
         self.fetch_all_chapters = fetch_all_chapters
 
