@@ -32,7 +32,7 @@ jobs:
           # neither of which import publoader.* at module level by the time
           # the new publoader.api shim has landed.
           find ./src -mindepth 2 -maxdepth 2 -name requirements.txt \
-            -exec pip install --no-cache-dir -r {} +
+            -exec pip install --no-cache-dir -r {} \;
 
       - name: Validate manifests
         run: python tools/validate_manifests.py
