@@ -72,6 +72,7 @@ class Extension:
         self.tracked_mangadex_ids: list = []
         self.tracked_manga: list = []
         self.manga_no_chapters: list = []
+        self.manga_ignored: list = []
         self._manga_id_map: dict = {}
         self._num2words: Optional[str] = None
         self._mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com/api/"
@@ -139,6 +140,17 @@ class Extension:
         self.override_options = self._open_override_options()
         self._num2words: Optional[str] = self._get_num2words_string()
         self.manga_no_chapters = self.override_options.get("no_chapters", [])
+
+        # Titles to skip during the update check (e.g. M+ Max or completed
+        # series). They stay mapped so existing chapters are untouched, but
+        # they aren't polled for new chapters.
+        self.manga_ignored = self.override_options.get("ignore", [])
+        if self.manga_ignored:
+            self.tracked_manga = [
+                mplus_id
+                for mplus_id in self.tracked_manga
+                if mplus_id not in self.manga_ignored
+            ]
 
         self._get_untracked_manga()
         self._get_manga_chapters()
@@ -291,7 +303,12 @@ class Extension:
 
             for manga in series.get("titles", []):
                 manga_id = str(manga.get("titleId", ""))
-                if manga_id not in self.tracked_manga + self.manga_no_chapters:
+                if (
+                    manga_id
+                    not in self.tracked_manga
+                    + self.manga_no_chapters
+                    + self.manga_ignored
+                ):
                     language = self._get_language(
                         manga.get("language", "ENGLISH"), manga_id
                     )
