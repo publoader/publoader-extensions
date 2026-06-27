@@ -7,7 +7,7 @@ import string
 import traceback
 import uuid
 from copy import deepcopy
-from datetime import datetime, time, timezone, timedelta
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Union
 
@@ -62,6 +62,11 @@ class Extension:
         self.manga_id_map_filename = "manga_id_map.json"
         self.override_options_filename = "override_options.json"
         self.extension_dirpath = extension_dirpath
+
+        # Force expired MangaPlus chapters to be marked unavailable rather than
+        # hard-deleted (preserves comment threads / reading history). Matches
+        # publoader's REMOVAL_MODE_UNAVAILABLE; overrides the global toggle.
+        self.chapter_removal_mode = "unavailable"
 
         self.fetch_all_chapters = False
         self._posted_chapters_ids: List[str] = []
@@ -471,10 +476,8 @@ class Extension:
 
     async def _chapter_updates(self, mangas: list):
         """Get the updated chapters from each manga."""
-        # for now, an updated chapter should've been uploaded in the past 3 days
         time_epoch_now = datetime.now()
-        time_epoch_three_days_ago = datetime.now() - timedelta(days = 3)
-        
+
         for manga in mangas:
             manga_response = await self._fetch_title_data(manga_id=manga)
             if not manga_response:
@@ -506,10 +509,7 @@ class Extension:
                 for chapter in normalised_chapters
                 if str(chapter.chapter_id) not in self._posted_chapters_ids
                 and chapter.chapter_expire >= time_epoch_now
-                and chapter.chapter_timestamp >= time_epoch_three_days_ago
             ]
-            # TODO: time_epoch_three_days_ago, as may be evident, is a bodge
-            # consider toggling an unavailable chapter or something (preserves comment threads)
 
             if updated_chapters:
                 logger.info(f"MangaPlus newly updated chapters: {updated_chapters}")
