@@ -137,7 +137,8 @@ fields apply to your publisher:
   "same": {"chapter_to_keep_id": ["other_chapter_id"]},
   "custom_language": {},
   "multi_chapters": {"chapter_id": ["chapter_number"]},
-  "override_chapter_numbers": {"chapter_id": "overridden_chapter_number"}
+  "override_chapter_numbers": {"chapter_id": "overridden_chapter_number"},
+  "ignore": ["series_id"]
 }
 ```
 
@@ -150,6 +151,7 @@ fields apply to your publisher:
 | `custom_language` | Language remapping for publishers that use non-standard codes. |
 | `multi_chapters` | One source chapter that should appear as multiple chapter numbers on MangaDex. |
 | `override_chapter_numbers` | Force a specific chapter number on a chapter ID. |
+| `ignore` | Series IDs to skip during the update check (e.g. M+ Max or completed titles). They stay mapped — existing chapters are untouched — but aren't polled for new chapters. |
 
 The runner only reads `same`, `custom_language`, `multi_chapters`, and
 `override_chapter_numbers`. Everything else is for the extension's own use.
