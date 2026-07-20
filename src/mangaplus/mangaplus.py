@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 import string
 import traceback
@@ -24,6 +25,106 @@ DEFAULT_TIMESTAMP = 1
 __version__ = "0.2.04"
 
 logger = logging.getLogger("mangaplus")
+
+
+# --- Real-user session spoofing -------------------------------------------
+# Present each run as an ordinary reader rather than an automated scraper: a
+# coherent, randomly chosen identity spanning desktop and mobile browsers, so
+# this extension's third-party requests blend into normal user traffic instead
+# of exposing a default/publoader User-Agent. (The base repo still identifies
+# honestly as publoader/<version> when talking to MangaDex; this only affects
+# the extension's own outbound requests.)
+_REAL_USER_PROFILES = (
+    {  # Chrome on Windows
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "Sec-CH-UA": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
+    },
+    {  # Chrome on macOS
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "Sec-CH-UA": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"macOS"',
+    },
+    {  # Firefox on Windows (no client hints)
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) "
+            "Gecko/20100101 Firefox/133.0"
+        ),
+    },
+    {  # Safari on macOS (no client hints)
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/18.1 Safari/605.1.15"
+        ),
+    },
+    {  # Edge on Windows
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+        ),
+        "Sec-CH-UA": '"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
+    },
+    {  # Chrome on Android (mobile)
+        "User-Agent": (
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        ),
+        "Sec-CH-UA": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "Sec-CH-UA-Mobile": "?1",
+        "Sec-CH-UA-Platform": '"Android"',
+    },
+    {  # Safari on iOS (mobile, no client hints)
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 "
+            "Mobile/15E148 Safari/604.1"
+        ),
+    },
+)
+
+
+def _real_user_headers(extra: Optional[dict] = None, *, web: bool = False) -> dict:
+    """A coherent real-user browser header set (desktop or mobile, random).
+
+    ``web=True`` adds the document-navigation headers a browser sends for a
+    top-level page load; otherwise a neutral XHR/API Accept is used. Anything
+    in ``extra`` (e.g. a session token) is layered on top and always wins.
+    """
+    profile = random.choice(_REAL_USER_PROFILES)
+    headers = {
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,*/*;q=0.8"
+            if web
+            else "application/json, text/plain, */*"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        **profile,
+    }
+    if web:
+        headers.update(
+            {
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+            }
+        )
+    if extra:
+        headers.update(extra)
+    return headers
 
 
 def _load_publoader_api() -> None:
@@ -207,10 +308,7 @@ class Extension:
         if "format" not in params:
             params["format"] = "json"
 
-        headers = {
-            "User-Agent": f"publoader/{__version__} (MangaPlus Extension)",
-            "SESSION-TOKEN": str(uuid.uuid4())
-        }
+        headers = _real_user_headers(extra={"SESSION-TOKEN": str(uuid.uuid4())})
 
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
@@ -394,7 +492,12 @@ class Extension:
         Returns:
             bytearray: The image data.
         """
-        res = requests.get(url)
+        res = requests.get(
+            url,
+            headers=_real_user_headers(
+                extra={"Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"}
+            ),
+        )
         data = bytearray(res.content)
         key = bytes.fromhex(encryption_hex)
         a = len(key)
