@@ -8,3 +8,5 @@ logs/*
 *.bak
 manga_data.json
 .idea
+node_modules
+index.mjs
