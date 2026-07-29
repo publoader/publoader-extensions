@@ -1,6 +1,6 @@
 {
   "name": "mangaplus",
-  "version": "0.2.04",
+  "version": "0.3.00",
   "publoader_api": "^1.0.0",
   "entrypoint": "mangaplus.py",
   "class_name": "Extension",

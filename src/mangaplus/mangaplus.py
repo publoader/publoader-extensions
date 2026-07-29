@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import random
 import re
 import string
+import sys
 import traceback
 import uuid
 from copy import deepcopy
@@ -16,15 +18,44 @@ import aiohttp
 import itertools
 import math
 import requests
+from google.protobuf import message as protobuf_message
+from google.protobuf.json_format import MessageToDict
 
 if TYPE_CHECKING:
     from publoader.models.dataclasses import Chapter, Manga
 
 DEFAULT_TIMESTAMP = 1
 
-__version__ = "0.2.04"
+__version__ = "0.3.00"
 
 logger = logging.getLogger("mangaplus")
+
+
+def _load_pb2():
+    """Load the generated mangaplus_pb2 module from this extension's directory.
+
+    The extension is exec'd standalone by publoader's loader (no package
+    context), so a plain ``import mangaplus_pb2`` would not resolve. Guarded
+    via sys.modules because re-executing generated protobuf code registers
+    duplicate symbols in the default descriptor pool.
+    """
+    module = sys.modules.get("mangaplus_pb2")
+    if module is not None:
+        return module
+
+    pb2_path = Path(__file__).resolve().parent.joinpath("mangaplus_pb2.py")
+    spec = importlib.util.spec_from_file_location("mangaplus_pb2", pb2_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["mangaplus_pb2"] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop("mangaplus_pb2", None)
+        raise
+    return module
+
+
+mangaplus_pb2 = _load_pb2()
 
 
 # --- Real-user session spoofing -------------------------------------------
@@ -178,7 +209,6 @@ class Extension:
         self._mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com/api/"
         self._chapter_url_format = "https://mangaplus.shueisha.co.jp/viewer/{}"
         self._manga_url_format = "https://mangaplus.shueisha.co.jp/titles/{}"
-        self._images_api_url = "https://jumpg-webapi.tokyo-cdn.com/api/manga_viewer?chapter_id={}&split=no&img_quality=super_high&format=json"
 
     @property
     def extension_languages_map(self):
@@ -304,11 +334,14 @@ class Extension:
         return manga_object
 
     async def _request_api(self, path: str, **params) -> Optional[dict]:
-        """Get manga and chapter details from the api."""
-        if "format" not in params:
-            params["format"] = "json"
+        """Get manga and chapter details from the api.
 
+        The api only serves protobuf now (`format=json` returns 403), so the
+        response is decoded with the vendored schema and converted to the same
+        camelCase dict structure the old json api returned.
+        """
         headers = _real_user_headers(extra={"SESSION-TOKEN": str(uuid.uuid4())})
+        params = {key: str(value) for key, value in params.items()}
 
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
@@ -316,32 +349,42 @@ class Extension:
                     self._mplus_base_api_url + path, params=params
                 ) as response:
                     assert response.status == 200
-                    data = await response.json()
-
-                    success_dict = data.get("success")
-                    if not success_dict:
-                        error_dict = data.get("error")
-                        eng_error_dict = error_dict.get("englishPopup", {})
-
-                        description = f"Error fetching MangaPlus API:\n`{response.url}`"
-                        error_body = eng_error_dict.get("body")
-                        if error_body:
-                            description = description + f"\n{error_body}"
-
-                        PubloaderWebhook(
-                            "mangaplus",
-                            footer={"text": "extensions.mangaplus"},
-                            title=eng_error_dict.get(
-                                "subject", "Error fetching MangaPlus API"
-                            ),
-                            description=description,
-                        ).send()
-
-                    return success_dict
-        except (ZeroDivisionError, aiohttp.ClientError) as e:
+                    url = str(response.url)
+                    raw_response = await response.read()
+        except (AssertionError, aiohttp.ClientError) as e:
             logger.error(f"{e}: Couldn't get details from the mangaplus api.")
             print("Request API Error", e)
             return None
+
+        try:
+            proto_response = mangaplus_pb2.Response()
+            proto_response.ParseFromString(raw_response)
+            data = MessageToDict(proto_response)
+        except protobuf_message.DecodeError as e:
+            logger.error(f"{e}: Couldn't decode the mangaplus api response.")
+            print("Request API Error", e)
+            return None
+
+        success_dict = data.get("success")
+        if not success_dict:
+            error_dict = data.get("error", {})
+            eng_error_dict = error_dict.get("englishPopup", {})
+
+            description = f"Error fetching MangaPlus API:\n`{url}`"
+            error_body = eng_error_dict.get("body")
+            if error_body:
+                description = description + f"\n{error_body}"
+
+            PubloaderWebhook(
+                "mangaplus",
+                footer={"text": "extensions.mangaplus"},
+                title=eng_error_dict.get(
+                    "subject", "Error fetching MangaPlus API"
+                ),
+                description=description,
+            ).send()
+
+        return success_dict
 
     async def _fetch_title_data(self, manga_id: int, **params) -> Optional[dict]:
         """Get manga and chapter details from the api."""
@@ -354,17 +397,21 @@ class Extension:
     async def _fetch_updates(self, **params) -> Optional[dict]:
         """Get manga and chapter details from the api."""
         return await self._request_api(
-            "web/web_homev4",
+            "web/web_homeV4",
             lang="eng",
             clang="eng,esp,tha,ptb,ind,rus,fra,deu,vie",
             **params,
         )
 
-    async def _fetch_chapter_images(self, chapter_id: str, **params) -> Optional[dict]:
+    async def _fetch_chapter_images_api(
+        self, chapter_id: str, **params
+    ) -> Optional[dict]:
         """Get manga and chapter details from the api."""
         return await self._request_api(
             "manga_viewer",
             chapter_id=chapter_id,
+            split="no",
+            img_quality="super_high",
             **params,
         )
 
@@ -382,7 +429,7 @@ class Extension:
             return
 
         updated_manga_unmerged = updated_manga_response.get("allTitlesViewV2", {}).get(
-            "AllTitlesGroup", []
+            "allTitlesGroup", []
         )
         for series in updated_manga_unmerged:
             manga_name = series.get("theTitle")
@@ -511,12 +558,13 @@ class Extension:
             return
 
         loop = create_new_event_loop()
-        task = self._fetch_chapter_images(chapter_id)
+        task = self._fetch_chapter_images_api(chapter_id)
         response = loop.run_until_complete(task)
         if not response:
             logger.error(f"Error fetching images data for chapter {chapter_id}.")
+            return
 
-        viewer = response.get("pages", [])
+        viewer = response.get("mangaViewer", {}).get("pages", [])
         pages = [
             p.get("mangaPage", {})
             for p in viewer
@@ -594,6 +642,7 @@ class Extension:
                         list(
                             itertools.chain(
                                 chapter_list.get("firstChapterList", []),
+                                chapter_list.get("midChapterList", []),
                                 chapter_list.get("lastChapterList", []),
                             )
                         ),
