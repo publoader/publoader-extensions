@@ -207,7 +207,12 @@ class MangaPlus implements ExtensionRuntime {
   private options: OverrideOptions = {};
   private numberWords: string | null = null;
 
-  constructor(private readonly ctx: ExtensionContext) {}
+  // Explicit field, not a parameter property — see the note in proto.ts.
+  private readonly ctx: ExtensionContext;
+
+  constructor(ctx: ExtensionContext) {
+    this.ctx = ctx;
+  }
 
   async collect(input: CollectInput): Promise<CollectResult> {
     this.options = await this.loadOverrideOptions();

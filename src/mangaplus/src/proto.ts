@@ -205,12 +205,15 @@ const WIRE_FIXED32 = 5;
 
 class Reader {
   pos: number;
+  // Explicit fields rather than TS parameter properties: these modules are
+  // executed directly by node --test, whose type-stripping loader does not
+  // implement parameter properties.
+  readonly buf: Uint8Array;
+  readonly end: number;
 
-  constructor(
-    readonly buf: Uint8Array,
-    start: number,
-    readonly end: number,
-  ) {
+  constructor(buf: Uint8Array, start: number, end: number) {
+    this.buf = buf;
+    this.end = end;
     this.pos = start;
   }
 
