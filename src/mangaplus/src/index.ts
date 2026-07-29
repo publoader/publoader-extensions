@@ -6,9 +6,17 @@
  * responses are decoded with the vendored schema in `mangaplus.proto`; see
  * `proto.ts` for how the decoded shape mirrors the Python dicts.
  *
- * Two endpoints are used, the same two the Python entrypoint reached:
- *   title_list/allV2  — the whole catalogue, to spot untracked series
- *   title_detailV3    — one call per tracked series, for its chapter lists
+ * Endpoints, cheap ones first:
+ *   title_list/allV2   — the whole catalogue: untracked series, and evidence
+ *                        that a tracked series is still published
+ *   web/web_homeV4     — update feed naming each title's newest chapter id and
+ *                        when it went up
+ *   title_list/updated — a second update feed, widening that coverage
+ *   title_detailV3     — the expensive one, a single series' chapter lists.
+ *                        The Python entrypoint called it for every tracked
+ *                        series every run; it is now called only for series the
+ *                        listings say have moved. `planner.ts` owns that
+ *                        decision and states the correctness argument.
  */
 
 import type {
@@ -23,6 +31,7 @@ import type {
 import {
   ProtoDecodeError,
   decodeResponse,
+  type PbAllTitlesGroup,
   type PbChapter,
   type PbResponse,
   type PbSuccessResult,
@@ -34,6 +43,8 @@ import {
   type OverrideOptions,
   type RawChapter,
 } from "./normalise";
+import { buildListing, type Listing } from "./listing";
+import { planFetch } from "./planner";
 
 const API_BASE = "https://jumpg-webapi.tokyo-cdn.com/api/";
 const CHAPTER_URL = (chapterId: string) =>
@@ -202,21 +213,45 @@ class MangaPlus implements ExtensionRuntime {
     this.options = await this.loadOverrideOptions();
     this.numberWords = numberWordsPattern(this.options);
 
-    const tracked = this.trackedManga(input.trackedSubset);
+    const tracked = [...this.ctx.mangaIdMap.keys()];
     this.ctx.log("Collecting MangaPlus updates", {
       tracked: tracked.length,
       cleanRun: input.cleanRun,
       partitioned: input.trackedSubset !== null,
     });
 
-    const untrackedManga = await this.findUntrackedManga();
+    const listing = await this.fetchListing();
+    const untrackedManga = this.findUntrackedManga(listing.catalogue);
 
     const now = Math.floor(Date.now() / 1000);
     const postedChapterIds = new Set(input.postedChapterIds);
+    const plan = planFetch({
+      tracked,
+      trackedSubset: input.trackedSubset,
+      cleanRun: input.cleanRun,
+      postedChapterIds,
+      listing: listing.entries,
+      updateFeedsAvailable: listing.updateFeedsAvailable,
+      windowStart: now - UPDATE_WINDOW_SECONDS,
+    });
+    this.ctx.log("MangaPlus fetch plan", {
+      candidates: plan.candidates,
+      detailCalls: plan.fetch.length,
+      skipped: plan.candidates - plan.fetch.length,
+      skipReasons: plan.skipCounts,
+      // A tracked series no listing mentions is skipped until the next clean
+      // run, so name the first few: a series that vanished from MangaPlus and
+      // one publoader has mistracked look identical from here.
+      absentFromListing: plan.skipped
+        .filter((title) => title.reason === "absent-from-listing")
+        .slice(0, 20)
+        .map((title) => title.mangaId),
+    });
+
     const allChapters: RawChapter[] = [];
     const updatedChapters: RawChapter[] = [];
 
-    const perManga = await runWithConcurrency(tracked, TITLE_CONCURRENCY, (mangaId) =>
+    const perManga = await runWithConcurrency(plan.fetch, TITLE_CONCURRENCY, (mangaId) =>
       this.fetchMangaChapters(mangaId),
     );
 
@@ -233,24 +268,24 @@ class MangaPlus implements ExtensionRuntime {
     }
 
     this.ctx.log("MangaPlus collection finished", {
-      allChapters: allChapters.length,
+      listingTitles: listing.entries.size,
+      listingSources: listing.sources,
+      candidates: plan.candidates,
+      detailCalls: plan.fetch.length,
+      chapters: allChapters.length,
       updatedChapters: updatedChapters.length,
       untrackedManga: untrackedManga.length,
+      cleanRun: input.cleanRun,
     });
 
     return {
       updatedChapters: updatedChapters.map(toChapterInput),
+      // Only a clean run fetched every tracked series, so only a clean run can
+      // claim to report the full catalogue. Anything else must send null —
+      // absence means "no removal information", never "everything was removed".
       allChapters: input.cleanRun ? allChapters.map(toChapterInput) : null,
       untrackedManga,
     };
-  }
-
-  private trackedManga(subset: readonly string[] | null): string[] {
-    const tracked = [...this.ctx.mangaIdMap.keys()];
-    if (subset === null) return tracked;
-
-    const wanted = new Set(subset);
-    return tracked.filter((mangaId) => wanted.has(mangaId));
   }
 
   private async loadOverrideOptions(): Promise<OverrideOptions> {
@@ -328,20 +363,59 @@ class MangaPlus implements ExtensionRuntime {
     return success;
   }
 
-  /** `_get_untracked_manga`: catalogue entries we have no MangaDex title for. */
-  private async findUntrackedManga(): Promise<MangaInput[]> {
-    const success = await this.requestApi("title_list/allV2");
-    if (success === null) {
-      this.ctx.log("Couldn't fetch all the MangaPlus series");
-      return [];
+  /**
+   * The three cheap listing calls, issued once per run: the catalogue and the
+   * two update feeds. They are what lets `planner.ts` skip series, so their
+   * failure modes matter more than their contents:
+   *
+   *  - the catalogue failing costs untracked-series detection for this run
+   *    (as it always did) but not the skipping, which reads the update feeds;
+   *  - BOTH update feeds failing disables skipping entirely — with no listing,
+   *    absence from it proves nothing, so the run falls back to fetching every
+   *    tracked series exactly as the Python version did.
+   */
+  private async fetchListing(): Promise<Listing> {
+    const [catalogue, webHome, updated] = await Promise.all([
+      this.requestApi("title_list/allV2"),
+      this.requestApi("web/web_homeV4"),
+      this.requestApi("title_list/updated"),
+    ]);
+    if (catalogue === null) this.ctx.log("Couldn't fetch all the MangaPlus series");
+
+    const listing = buildListing({ catalogue, webHome, updated });
+
+    if (!listing.feedsAnswered) {
+      this.ctx.log("No MangaPlus update feed answered; fetching every tracked series");
+    } else if (listing.updateSignals === 0) {
+      // MangaPlus publishes something every day, so feeds that answer and name
+      // no updated title are far more likely to have moved a protobuf field
+      // number than to be idle. Fetch everything rather than read it as
+      // "nothing to do" and silently upload nothing.
+      this.ctx.log(
+        "MangaPlus update feeds named no updated titles; fetching every tracked series",
+        { webHome: webHome !== null, updated: updated !== null },
+      );
+    } else if (webHome === null || updated === null) {
+      this.ctx.log("A MangaPlus update feed didn't answer; coverage is narrower this run", {
+        webHome: webHome !== null,
+        updated: updated !== null,
+      });
     }
 
+    return listing;
+  }
+
+  /**
+   * `_get_untracked_manga`: catalogue entries we have no MangaDex title for.
+   * Reads the catalogue the listing already fetched, so this costs no request.
+   */
+  private findUntrackedManga(catalogue: readonly PbAllTitlesGroup[]): MangaInput[] {
     // Membership is tested against every tracked series, not just this
     // segment's, so a partitioned run never reports a title another segment owns.
     const known = new Set([...this.ctx.mangaIdMap.keys(), ...(this.options.no_chapters ?? [])]);
 
     const untracked: MangaInput[] = [];
-    for (const group of success.allTitlesViewV2?.allTitlesGroup ?? []) {
+    for (const group of catalogue) {
       for (const title of group.titles ?? []) {
         if (title.titleId === undefined) continue;
 

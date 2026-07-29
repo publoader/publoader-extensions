@@ -15,5 +15,9 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src"]
+  // Tests are checked by tsconfig.test.json instead: they are the only files
+  // allowed to see Node's globals, so the extension itself cannot reach for
+  // them by accident.
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }

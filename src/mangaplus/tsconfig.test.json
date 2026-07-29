@@ -1,0 +1,12 @@
+{
+  // The unit tests: the only files here that may use Node's globals, and the
+  // only ones that import with a `.ts` extension (Node's ESM loader needs it,
+  // since `node --test src/planner.test.ts` runs the sources as-is).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/**/*.test.ts"],
+  "exclude": []
+}

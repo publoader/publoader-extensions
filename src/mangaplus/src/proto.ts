@@ -396,9 +396,45 @@ export interface PbAllTitlesGroup {
   titles?: PbTitle[];
 }
 
+/** One language's release of a chapter, as the web home page lists it. */
+export interface PbUpdatedChapterTitle {
+  title?: PbTitle;
+  chapterId?: number;
+  chapterName?: string;
+  chapterSubTitle?: string;
+  /** Set when this is the title's newest chapter. */
+  isLatest?: boolean;
+}
+
+/** One release on the web home page: the same chapter across languages. */
+export interface PbUpdatedTitleV2Group {
+  theTitle?: string;
+  chapterNumber?: string;
+  titles?: PbUpdatedChapterTitle[];
+  /** Epoch seconds the chapter became readable. */
+  chapterStartTime?: number;
+}
+
+export interface PbWebHomeGroup {
+  groupName?: string;
+  titleGroups?: PbUpdatedTitleV2Group[];
+}
+
+/**
+ * An entry in `title_list/updated`. The wire type of `updated_time_stamp` was
+ * derived empirically as a string; it is typed loosely here because a numeric
+ * encoding would decode to a number, and the reader coerces either.
+ */
+export interface PbUpdatedTitle {
+  title?: PbTitle;
+  updatedTimeStamp?: string | number;
+}
+
 export interface PbSuccessResult {
   titleDetailView?: PbTitleDetailView;
   allTitlesViewV2?: { allTitlesGroup?: PbAllTitlesGroup[] };
+  titleUpdatedView?: { latestTitle?: PbUpdatedTitle[] };
+  webHomeViewV4?: { groups?: PbWebHomeGroup[] };
 }
 
 export interface PbPopup {
