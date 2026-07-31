@@ -5,14 +5,24 @@
   "runtime": "node",
   "entrypoint": "index.mjs",
   "mangadex_group_id": "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb",
-  "languages": ["en", "es", "fr", "id", "pt-br", "ru", "th", "de", "vi"],
+  "languages": [
+    "en",
+    "es",
+    "fr",
+    "id",
+    "pt-br",
+    "ru",
+    "th",
+    "de",
+    "vi"
+  ],
   "allowed_hosts": [
     "jumpg-webapi.tokyo-cdn.com",
     "mangaplus.shueisha.co.jp"
   ],
   "permissions": {
     "network": true,
-    "filesystem_read": ["manga_id_map.json", "override_options.json"],
+    "filesystem_read": [],
     "filesystem_write": [],
     "subprocess": false
   },
@@ -30,6 +40,8 @@
     "maxSegments": 4,
     "minMangaPerSegment": 25
   },
-  "maintainers": ["publoader"],
+  "maintainers": [
+    "publoader"
+  ],
   "homepage": "https://mangaplus.shueisha.co.jp/"
 }

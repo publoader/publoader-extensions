@@ -1,0 +1,4 @@
+# Paths json-yaml-validate should skip. These are JSONC (comments allowed),
+# which TypeScript accepts and a strict JSON parser does not.
+**/tsconfig.json
+**/tsconfig.test.json
