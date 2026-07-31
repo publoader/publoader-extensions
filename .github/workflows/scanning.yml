@@ -61,3 +61,8 @@ jobs:
       uses: GrantBirki/json-yaml-validate@v1.5.0
       with:
         comment: "true"
+        # tsconfig files are JSONC, not JSON: TypeScript reads comments there and
+        # the ones in this repo explain why tests are type-checked separately.
+        # A strict JSON parser calls that "Invalid JSON" with a null path, which
+        # names neither the file nor the reason.
+        exclude_file: .github/json-validate-exclude.txt

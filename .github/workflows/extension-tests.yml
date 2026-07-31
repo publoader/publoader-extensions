@@ -22,7 +22,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+          # No `cache: pip`. mangaplus is on the node runtime now and there is no
+          # requirements.txt left in the tree, which setup-python treats as an
+          # error — failing the job before a single check runs.
 
       - name: Install all extension requirements
         run: |
