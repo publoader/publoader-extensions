@@ -11,6 +11,18 @@
 /** A chapter before number/title normalisation; timestamps are epoch seconds. */
 export interface RawChapter {
   chapterId: string;
+  /**
+   * Which of `title_detailV3`'s three per-group lists this chapter came from.
+   *
+   * Internal to the extension — `toChapterInput` never emits it. It exists
+   * because MangaPlus' free window is "the first few chapters and the last
+   * few", so a chapter in the middle list is the one most likely to be listed
+   * but unreadable. The availability check spends its per-run budget on those
+   * first. It is a hint about where to look, never evidence on its own: plenty
+   * of mid-list chapters of an ongoing series are perfectly readable, and only
+   * `manga_viewer` decides.
+   */
+  listSlot?: "first" | "mid" | "last";
   chapterUrl: string;
   chapterTimestamp: number;
   chapterExpire: number;
@@ -41,6 +53,18 @@ export interface OverrideOptions {
   no_chapters?: string[];
   /** Master chapter id -> alternate ids; consumed by the platform, not here. */
   same?: Record<string, string[]>;
+  /**
+   * Check each candidate chapter's real page count via `manga_viewer`, and
+   * treat a chapter serving fewer than one page as dead.
+   *
+   * OFF by default, and deliberately so: it costs one request per chapter, and
+   * MangaPlus answers a client it dislikes with an outright account ban rather
+   * than a rate-limit — one un-throttled burst of these was enough to earn one.
+   * A ban would take publoader off MangaPlus entirely, which is a worse outcome
+   * than the dead links it would find, so switching this on is a decision to
+   * make deliberately rather than a default to inherit.
+   */
+  verify_pages?: boolean;
 }
 
 /** publoader's chapter-number validator (utils/utils.py). */

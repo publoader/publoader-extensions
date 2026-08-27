@@ -18,7 +18,8 @@
   ],
   "allowed_hosts": [
     "jumpg-webapi.tokyo-cdn.com",
-    "mangaplus.shueisha.co.jp"
+    "mangaplus.shueisha.co.jp",
+    "jumpg-assets.tokyo-cdn.com"
   ],
   "permissions": {
     "network": true,
