@@ -64,6 +64,16 @@ export interface CollectInput {
 
 export interface ExtensionContext {
   readonly manifest: Readonly<Record<string, unknown>>;
+  /**
+   * The extension's configuration as the DATABASE holds it — what the dashboard
+   * edits, rather than what the bundle shipped with.
+   *
+   * Optional because an older runner does not send it, and an absent field must
+   * not be mistaken for an empty configuration. The two are not merged for you:
+   * how the database's copy relates to the bundled one is the extension's
+   * decision to make explicitly.
+   */
+  readonly overrideOptions?: Readonly<Record<string, unknown>>;
   /** External manga id -> MangaDex title id, DB-authoritative. */
   readonly mangaIdMap: ReadonlyMap<string, string>;
   /** The only sanctioned network primitive; enforces manifest allowed_hosts. */
