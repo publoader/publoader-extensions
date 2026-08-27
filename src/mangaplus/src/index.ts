@@ -327,6 +327,11 @@ class MangaPlus implements ExtensionRuntime {
       });
     }
 
+    const dead = await this.findDeadChapters(input, allChapters, updatedChapters);
+    const isDead = (chapter: RawChapter): boolean => dead.has(chapter.chapterId);
+    const liveUpdated = updatedChapters.filter((chapter) => !isDead(chapter));
+    const liveAll = allChapters.filter((chapter) => !isDead(chapter));
+
     // Every fetched series failing is the API refusing us, not a catalogue that
     // emptied itself. Publishing that as a clean run's catalogue would claim
     // MangaPlus has nothing at all.
@@ -338,11 +343,11 @@ class MangaPlus implements ExtensionRuntime {
     }
 
     return {
-      updatedChapters: updatedChapters.map(toChapterInput),
+      updatedChapters: liveUpdated.map(toChapterInput),
       // Only a clean run fetched every tracked series, so only a clean run can
       // claim to report the full catalogue. Anything else must send null —
       // absence means "no removal information", never "everything was removed".
-      allChapters: input.cleanRun ? allChapters.map(toChapterInput) : null,
+      allChapters: input.cleanRun ? liveAll.map(toChapterInput) : null,
       untrackedManga,
       // Series that could not be read. Without this the entries missing from
       // `allChapters` above would read as removals and unpublish them.
@@ -515,6 +520,95 @@ class MangaPlus implements ExtensionRuntime {
   }
 
   /**
+   * Which candidate chapters are dead — listed by MangaPlus but serving no
+   * pages.
+   *
+   * Two things happen here, and only one of them costs anything.
+   *
+   * The free half always runs: it records which of `title_detailV3`'s three
+   * per-group lists each chapter came from. Across every title sampled so far
+   * the readable chapters sat in `first`/`last` and the refused ones in `mid`
+   * (Heart Gear #004 and #052 both refused from `mid` while #001-#003 served
+   * from `first`), which would make a chapter's list membership a free, exact
+   * dead-chapter signal on every run. That is a correlation observed on three
+   * titles, not a proven rule, so it is logged rather than acted on. Acting on
+   * it while it is still a guess would card live chapters.
+   *
+   * The expensive half runs only when `verify_pages` is set: one
+   * `manga_viewer` call per candidate chapter. It is off by default because
+   * MangaPlus answers a client it dislikes with an outright account ban rather
+   * than a rate-limit, and a ban costs the whole extension.
+   *
+   * Returns the chapter ids to treat as dead — empty unless verification ran
+   * and produced findings it trusts.
+   */
+  private async findDeadChapters(
+    input: CollectInput,
+    allChapters: readonly RawChapter[],
+    updatedChapters: readonly RawChapter[],
+  ): Promise<Set<string>> {
+    // A clean run is judging the whole catalogue for removal, so its candidates
+    // are everything; any other run can only upload, so only the chapters it is
+    // about to upload matter.
+    const candidates = input.cleanRun ? allChapters : updatedChapters;
+    const bySlot = { first: 0, mid: 0, last: 0, unknown: 0 };
+    for (const chapter of candidates) bySlot[chapter.listSlot ?? "unknown"] += 1;
+
+    if (!this.options.verify_pages) {
+      this.ctx.log("MangaPlus page verification is off; reporting list slots only", {
+        candidates: candidates.length,
+        bySlot,
+        cleanRun: input.cleanRun,
+      });
+      return new Set();
+    }
+
+    const { verdicts, trusted } = await this.judgeAvailability(candidates);
+
+    // The cross-tab is the point of logging any of this: it is what turns "mid
+    // looks like it means paywalled" into evidence, or refutes it.
+    const crossTab: Record<string, { dead: number; available: number; unknown: number }> = {};
+    for (const chapter of candidates) {
+      const slot = chapter.listSlot ?? "unknown";
+      const cell = (crossTab[slot] ??= { dead: 0, available: 0, unknown: 0 });
+      const verdict = verdicts.get(chapter.chapterId)?.verdict ?? "unknown";
+      cell[verdict] += 1;
+    }
+    this.ctx.log("MangaPlus dead-chapter verdicts by list slot", { crossTab, trusted });
+
+    if (!trusted) return new Set();
+
+    const dead = new Set<string>();
+    for (const chapter of candidates) {
+      if (verdicts.get(chapter.chapterId)?.verdict === "dead") dead.add(chapter.chapterId);
+    }
+
+    // The chapters about to be published are worth a second, stronger check:
+    // a page count is MangaPlus' word for it, and its word is what put a dead
+    // chapter on MangaDex. Retrieving a page proves what a reader would get.
+    for (const chapter of updatedChapters) {
+      if (dead.has(chapter.chapterId)) continue;
+      const verified = await this.verifyFirstPage(chapter.chapterId);
+      if (verified === "bad") {
+        dead.add(chapter.chapterId);
+        this.ctx.log("MangaPlus chapter reported pages but served no image", {
+          chapterId: chapter.chapterId,
+          mangaId: chapter.mangaId,
+        });
+      }
+    }
+
+    if (dead.size > 0) {
+      this.ctx.log("MangaPlus dead chapters found", {
+        dead: dead.size,
+        of: candidates.length,
+        chapterIds: [...dead].slice(0, 20),
+      });
+    }
+    return dead;
+  }
+
+  /**
    * Ask `manga_viewer` what one chapter actually serves.
    *
    * The listing is not consulted here on purpose: the whole point is to get a
@@ -676,14 +770,14 @@ class MangaPlus implements ExtensionRuntime {
     }
 
     const groups = (detail.chapterListGroup ?? []).map((group) =>
-      this.normaliseChapterObjects(
-        [
-          ...(group.firstChapterList ?? []),
-          ...(group.midChapterList ?? []),
-          ...(group.lastChapterList ?? []),
-        ],
-        manga,
-      ),
+      // Which list a chapter came from is kept, not flattened away: it is the
+      // only free evidence in the response about whether a chapter is actually
+      // readable. See `listSlot` on RawChapter.
+      [
+        ...this.normaliseChapterObjects(group.firstChapterList ?? [], manga, "first"),
+        ...this.normaliseChapterObjects(group.midChapterList ?? [], manga, "mid"),
+        ...this.normaliseChapterObjects(group.lastChapterList ?? [], manga, "last"),
+      ],
     );
 
     return { chapters: normaliseChapters(groups, this.options, this.numberWords), failed: false };
@@ -710,6 +804,7 @@ class MangaPlus implements ExtensionRuntime {
   private normaliseChapterObjects(
     chapters: readonly PbChapter[],
     manga: { mangaId: string; mangaName: string | null; language: string },
+    listSlot: "first" | "mid" | "last",
   ): RawChapter[] {
     const normalised: RawChapter[] = [];
     for (const chapter of chapters) {
@@ -727,6 +822,7 @@ class MangaPlus implements ExtensionRuntime {
         mangaId: manga.mangaId,
         mangaName: manga.mangaName,
         mangaUrl: MANGA_URL(manga.mangaId),
+        listSlot,
       });
     }
     return normalised;

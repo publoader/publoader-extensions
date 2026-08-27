@@ -53,6 +53,18 @@ export interface OverrideOptions {
   no_chapters?: string[];
   /** Master chapter id -> alternate ids; consumed by the platform, not here. */
   same?: Record<string, string[]>;
+  /**
+   * Check each candidate chapter's real page count via `manga_viewer`, and
+   * treat a chapter serving fewer than one page as dead.
+   *
+   * OFF by default, and deliberately so: it costs one request per chapter, and
+   * MangaPlus answers a client it dislikes with an outright account ban rather
+   * than a rate-limit — one un-throttled burst of these was enough to earn one.
+   * A ban would take publoader off MangaPlus entirely, which is a worse outcome
+   * than the dead links it would find, so switching this on is a decision to
+   * make deliberately rather than a default to inherit.
+   */
+  verify_pages?: boolean;
 }
 
 /** publoader's chapter-number validator (utils/utils.py). */
