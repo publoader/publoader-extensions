@@ -365,18 +365,47 @@ class MangaPlus implements ExtensionRuntime {
     };
   }
 
+  /**
+   * The bundled configuration, with the database's copy laid over it.
+   *
+   * The bundle is the baseline: `same`, `multi_chapters` and the title-format
+   * overrides are curated alongside the code and change with it. The database
+   * is what an operator can actually edit, so anything set there wins — which
+   * is the only way a setting like `verify_pages` can be turned on for one run
+   * without publishing a new bundle.
+   *
+   * Merged at the top level only. Every option here is a whole value —
+   * a flag, or a map that is replaced wholesale — and a deep merge would make
+   * "remove this entry" impossible to express from the database.
+   */
   private async loadOverrideOptions(): Promise<OverrideOptions> {
+    let bundled: OverrideOptions = {};
     // data_files declares the logical name and the filename; which one
     // dataFile() keys on is the runner's business, so try both.
     for (const name of ["override_options", "override_options.json"]) {
       try {
-        return JSON.parse(await this.ctx.dataFile(name)) as OverrideOptions;
+        bundled = JSON.parse(await this.ctx.dataFile(name)) as OverrideOptions;
+        break;
       } catch {
         continue;
       }
     }
-    this.ctx.log("No readable override_options; continuing without overrides");
-    return {};
+    if (Object.keys(bundled).length === 0) {
+      this.ctx.log("No readable bundled override_options; using the database's copy alone");
+    }
+
+    // Older runners do not send it; an absent field must not blank the bundle.
+    const fromDatabase = (this.ctx.overrideOptions ?? {}) as Partial<OverrideOptions>;
+    const merged = { ...bundled, ...fromDatabase };
+
+    const overridden = Object.keys(fromDatabase);
+    if (overridden.length > 0) {
+      this.ctx.log("Database override_options applied over the bundled copy", {
+        keys: overridden,
+        verifyPages: merged.verify_pages === true,
+      });
+    }
+    return merged;
   }
 
   /**
