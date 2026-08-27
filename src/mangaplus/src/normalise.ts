@@ -11,6 +11,18 @@
 /** A chapter before number/title normalisation; timestamps are epoch seconds. */
 export interface RawChapter {
   chapterId: string;
+  /**
+   * Which of `title_detailV3`'s three per-group lists this chapter came from.
+   *
+   * Internal to the extension — `toChapterInput` never emits it. It exists
+   * because MangaPlus' free window is "the first few chapters and the last
+   * few", so a chapter in the middle list is the one most likely to be listed
+   * but unreadable. The availability check spends its per-run budget on those
+   * first. It is a hint about where to look, never evidence on its own: plenty
+   * of mid-list chapters of an ongoing series are perfectly readable, and only
+   * `manga_viewer` decides.
+   */
+  listSlot?: "first" | "mid" | "last";
   chapterUrl: string;
   chapterTimestamp: number;
   chapterExpire: number;

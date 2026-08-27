@@ -38,6 +38,19 @@ export interface CollectResult {
   /** Full current catalogue; required on clean runs, null otherwise. */
   allChapters: ChapterInput[] | null;
   untrackedManga: MangaInput[];
+  /**
+   * External manga ids this run could not fetch, and therefore knows nothing
+   * about.
+   *
+   * A title absent from `allChapters` is read by the platform as "the publisher
+   * has nothing here any more", so a series that merely failed to load must be
+   * named here rather than quietly omitted — omitting it unpublishes its whole
+   * back catalogue on MangaDex. Listing it means "no information", and the
+   * removal pass is skipped for that title alone.
+   *
+   * Optional: an extension that never reports failures behaves as before.
+   */
+  failedManga?: string[];
 }
 
 export interface CollectInput {
