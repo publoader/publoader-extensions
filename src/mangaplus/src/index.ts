@@ -74,11 +74,21 @@ const TITLE_CONCURRENCY = 4;
  */
 const VIEWER_CONCURRENCY = 6;
 /**
- * Hard ceiling on viewer calls in one run. Reaching it leaves the remaining
- * chapters unjudged, which keeps them — the safe direction — and is logged
- * rather than passed over silently.
+ * Viewer calls one run may spend, sized to fit the job's wall clock.
+ *
+ * The platform throttles every extension request to one per 500ms, so the
+ * budget is a duration in disguise: 2000 calls is about 17 minutes. A clean run
+ * has already spent roughly 9 minutes on its ~1,038 `title_detailV3` calls
+ * before reaching this, and the job is killed at 3600s, so the two together sit
+ * comfortably inside it. The previous ceiling of 20000 was no ceiling at all —
+ * one call per chapter of the catalogue is ~6,300, about 52 minutes of pure
+ * request time, and the job would have been killed mid-sweep.
+ *
+ * Reaching the budget leaves the remaining chapters unjudged, which keeps them:
+ * an unchecked chapter is treated as alive, so a short run under-reports rather
+ * than unpublishing anything, and says so in the log.
  */
-const MAX_VIEWER_CALLS = 20000;
+const MAX_VIEWER_CALLS = 2000;
 /** What `manga_viewer` is asked for; matches what the site itself requests. */
 const VIEWER_PARAMS = { split: "yes", img_quality: "high" } as const;
 
@@ -642,16 +652,41 @@ class MangaPlus implements ExtensionRuntime {
     const verdicts = new Map<string, ChapterAvailability>();
     // `normaliseChapters` emits one entry per MangaDex chapter number, so a
     // `multi_chapters` chapter appears several times under one MangaPlus id.
-    const chapterIds = [...new Set(chapters.map((chapter) => chapter.chapterId))];
+    // First occurrence wins, which keeps the slot of the entry it came from.
+    const bySlot = new Map<string, RawChapter["listSlot"]>();
+    for (const chapter of chapters) {
+      if (!bySlot.has(chapter.chapterId)) bySlot.set(chapter.chapterId, chapter.listSlot);
+    }
+    const chapterIds = [...bySlot.keys()];
     if (chapterIds.length === 0) return { verdicts, trusted: true };
 
-    const capped = chapterIds.length > MAX_VIEWER_CALLS;
-    const toCheck = capped ? chapterIds.slice(0, MAX_VIEWER_CALLS) : chapterIds;
+    // Spend the budget on the likeliest dead chapters first.
+    //
+    // MangaPlus keeps the opening chapters and the most recent ones free, and
+    // everything between them sits in `midChapterList`. Every refusal seen so
+    // far came from `mid` while `first`/`last` served pages. So when the budget
+    // cannot cover the catalogue, checking `mid` first finds far more of the
+    // dead chapters than reading the list in whatever order it arrived — which
+    // would also re-check the same opening chapters on every run and never
+    // reach the middle at all.
+    const rank = (id: string): number => {
+      const slot = bySlot.get(id);
+      return slot === "mid" ? 0 : slot === "last" ? 1 : 2;
+    };
+    const ordered = [...chapterIds].sort((a, b) => rank(a) - rank(b));
+
+    const capped = ordered.length > MAX_VIEWER_CALLS;
+    const toCheck = capped ? ordered.slice(0, MAX_VIEWER_CALLS) : ordered;
     if (capped) {
-      this.ctx.log("Too many chapters to check for pages; the rest are left as-is", {
-        chapters: chapterIds.length,
+      const uncheckedBySlot = { first: 0, mid: 0, last: 0, unknown: 0 };
+      for (const id of ordered.slice(MAX_VIEWER_CALLS)) {
+        uncheckedBySlot[bySlot.get(id) ?? "unknown"] += 1;
+      }
+      this.ctx.log("Ran out of page-check budget; the rest are left as-is and stay published", {
+        chapters: ordered.length,
         checked: toCheck.length,
-        unchecked: chapterIds.length - toCheck.length,
+        unchecked: ordered.length - toCheck.length,
+        uncheckedBySlot,
       });
     }
 
