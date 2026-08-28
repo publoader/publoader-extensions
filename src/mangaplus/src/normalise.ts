@@ -6,7 +6,20 @@
  * The regexes and the branch order are load-bearing: they decide what chapter
  * number and title land on MangaDex, and every override in
  * `override_options.json` was tuned against this exact behaviour.
+ *
+ * The one deliberate departure from the Python original is how `ex` chapters
+ * are numbered: that now lives in `extras.ts`, which places a whole run of
+ * them at once instead of deriving a decimal from a pair of list indices.
  */
+
+import {
+  assignExtras,
+  chapterValue,
+  formatValue,
+  isExtra,
+  type Hundredths,
+  type NumberedSlot,
+} from "./extras.ts";
 
 /** A chapter before number/title normalisation; timestamps are epoch seconds. */
 export interface RawChapter {
@@ -53,6 +66,8 @@ export interface OverrideOptions {
   no_chapters?: string[];
   /** Master chapter id -> alternate ids; consumed by the platform, not here. */
   same?: Record<string, string[]>;
+  /** Extra chapter-name spellings beyond "ex"/"extra", e.g. "omake". */
+  extra_markers?: string[];
   /**
    * Check each candidate chapter's real page count via `manga_viewer`, and
    * treat a chapter serving fewer than one page as dead.
@@ -120,39 +135,6 @@ function indexOfChapter(chapters: readonly RawChapter[], target: RawChapter): nu
   return chapters.findIndex((chapter) => chapterIdentity(chapter) === key);
 }
 
-/**
- * `_get_surrounding_chapter`: the nearest chapter whose number starts with a
- * plain integer, searching backwards from the current chapter or forwards from
- * it (the forward search includes the current chapter itself, as in Python —
- * it only ever survives the integer test if its own number parses, which an
- * "ex" chapter never does).
- */
-function getSurroundingChapter(
-  chapters: readonly RawChapter[],
-  current: RawChapter,
-  nextChapterSearch: boolean,
-): RawChapter | null {
-  const index = indexOfChapter(chapters, current);
-  if (index < 0) return null;
-
-  const search = nextChapterSearch
-    ? chapters.slice(index)
-    : chapters.slice(0, index).reverse();
-
-  for (const chapter of search) {
-    // Python raised TypeError on a null number here; skipping is strictly safer.
-    if (chapter.chapterNumber === null) continue;
-
-    const match = /^#?(\d+)/.exec(chapter.chapterNumber);
-    const number = match
-      ? match[1]
-      : stripHashes(chapter.chapterNumber).split(WORD_SPLIT_RE)[0];
-
-    if (strictInt(number) !== null) return chapter;
-  }
-  return null;
-}
-
 /** `re.sub(pattern, "", value, count)` — replace at most `count` matches. */
 function replaceLimited(value: string, pattern: RegExp, count: number): string {
   let result = value;
@@ -164,89 +146,85 @@ function replaceLimited(value: string, pattern: RegExp, count: number): string {
   return result;
 }
 
+/** Every extra-chapter marker this title should recognise. */
+function extraMarkers(options: OverrideOptions): readonly string[] {
+  return options.extra_markers ?? [];
+}
+
+/**
+ * The MangaDex numbers already spoken for by overrides on chapters of this
+ * list. They are uploaded like any other number, so an inferred extra must
+ * not land on one.
+ */
+function reservedValues(
+  chapters: readonly RawChapter[],
+  options: OverrideOptions,
+): Hundredths[] {
+  const forced = options.override_chapter_numbers ?? {};
+  const multi = options.multi_chapters ?? {};
+
+  const reserved: Hundredths[] = [];
+  for (const chapter of chapters) {
+    const numbers = Object.prototype.hasOwnProperty.call(forced, chapter.chapterId)
+      ? [forced[chapter.chapterId]]
+      : (multi[chapter.chapterId] ?? []);
+
+    for (const number of numbers) {
+      const value = chapterValue(number);
+      if (value !== null) reserved.push(value);
+    }
+  }
+  return reserved;
+}
+
+/**
+ * Chapter id -> the MangaDex number inferred for it, for every extra chapter
+ * in the list. Built once per title because an extra's number depends on its
+ * neighbours and on what its siblings were given.
+ */
+export function buildExtraAssignment(
+  chapters: readonly RawChapter[],
+  options: OverrideOptions,
+): Map<string, string | null> {
+  const markers = extraMarkers(options);
+  const slots: NumberedSlot[] = chapters.map((chapter) => {
+    const extra = isExtra(chapter.chapterNumber, markers);
+    return { extra, value: extra ? null : chapterValue(chapter.chapterNumber) };
+  });
+
+  const assigned = assignExtras(slots, reservedValues(chapters, options));
+
+  const numbers = new Map<string, string | null>();
+  for (let index = 0; index < chapters.length; index += 1) {
+    if (!slots[index].extra) continue;
+    const value = assigned[index];
+    numbers.set(chapters[index].chapterId, value === null ? null : formatValue(value));
+  }
+  return numbers;
+}
+
 /**
  * `_normalise_chapter_number`. Returns one entry per MangaDex chapter number
  * the chapter should be uploaded as — usually one, more when the
  * `multi_chapters` override says MangaPlus merged several chapters into one.
+ *
+ * `assignment` comes from `buildExtraAssignment` over the title's whole
+ * chapter list; without it the extras are placed using only `chapters`, which
+ * is correct but blind to any group the caller did not pass in.
  */
 export function normaliseChapterNumber(
   chapters: readonly RawChapter[],
   chapter: RawChapter,
   options: OverrideOptions,
+  assignment?: ReadonlyMap<string, string | null>,
 ): (string | null)[] {
   const currentNumber = stripChapterNumber(chapter.chapterNumber);
   let chapterNumber: string | number | null =
     chapter.chapterNumber === null ? null : currentNumber;
 
-  if (chapterNumber === "ex") {
-    const previousChapter = getSurroundingChapter(chapters, chapter, false);
-    const nextChapter = getSurroundingChapter(chapters, chapter, true);
-
-    let nextChapterNumber: number | null = null;
-    if (nextChapter !== null) {
-      const head = stripChapterNumber(nextChapter.chapterNumber).split(/[.\-,]/)[0];
-      const parsed = strictInt(head);
-      nextChapterNumber = parsed === null ? null : parsed - 1;
-    }
-
-    let previousChapterNumber: string | null = null;
-    if (previousChapter !== null) {
-      const stripped = stripChapterNumber(previousChapter.chapterNumber);
-      previousChapterNumber = stripped.includes(",")
-        ? stripped.split(",")[stripped.split(",").length - 1]
-        : stripped.split(/[.\-]/)[0];
-    }
-
-    let firstIndex: RawChapter | null = null;
-    let secondIndex: RawChapter | null = null;
-
-    if (previousChapter === null) {
-      if (nextChapter === null) {
-        chapterNumber = null;
-      } else {
-        chapterNumber = nextChapterNumber;
-        firstIndex = nextChapter;
-        secondIndex = chapter;
-      }
-    } else {
-      chapterNumber = previousChapterNumber;
-      firstIndex = chapter;
-      secondIndex = previousChapter;
-    }
-
-    if (chapterNumber === "ex") chapterNumber = null;
-
-    // Unreachable: reaching this branch means currentNumber === "ex". Kept so
-    // the port stays a line-for-line mirror of the original.
-    if (chapterNumber !== null && currentNumber !== "ex") {
-      const distance = Math.abs(Number(currentNumber) - Number(chapterNumber));
-      if (distance >= 5) chapterNumber = null;
-    }
-
-    if (chapterNumber !== null) {
-      let chapterDecimal: string | number = "5";
-
-      const firstPosition = firstIndex === null ? -1 : indexOfChapter(chapters, firstIndex);
-      const secondPosition = secondIndex === null ? -1 : indexOfChapter(chapters, secondIndex);
-      if (firstPosition >= 0 && secondPosition >= 0) {
-        const difference = firstPosition - secondPosition;
-        if (nextChapter === null) chapterDecimal = difference;
-
-        // Several extra chapters can sit before the same numbered chapter; the
-        // index gap keeps them from colliding on the same ".5".
-        if (difference > 1) {
-          const secondNumber = secondIndex === null ? null : secondIndex.chapterNumber;
-          if (secondNumber !== null && secondNumber.includes(".")) {
-            const decimal = strictInt(secondNumber.split(".")[secondNumber.split(".").length - 1]);
-            if (decimal !== null) chapterDecimal = decimal + 1;
-          } else {
-            chapterDecimal = difference;
-          }
-        }
-      }
-
-      chapterNumber = `${chapterNumber}.${chapterDecimal}`;
-    }
+  if (isExtra(chapter.chapterNumber, extraMarkers(options))) {
+    const numbers = assignment ?? buildExtraAssignment(chapters, options);
+    chapterNumber = numbers.get(chapter.chapterId) ?? null;
   } else if (
     typeof chapterNumber === "string" &&
     ["one-shot", "one.shot"].includes(chapterNumber.toLowerCase())
@@ -365,22 +343,36 @@ export function normaliseChapterFields(
   chapter: RawChapter,
   options: OverrideOptions,
   numberWords: string | null,
+  assignment?: ReadonlyMap<string, string | null>,
 ): RawChapter[] {
-  const numbers = normaliseChapterNumber(chapters, chapter, options);
+  const numbers = normaliseChapterNumber(chapters, chapter, options, assignment);
   const title = normaliseChapterTitle(chapter, numbers, options, numberWords);
   return numbers.map((number) => ({ ...chapter, chapterNumber: number, chapterTitle: title }));
 }
 
-/** `normalise_chapters`: every chapter of every chapter-list group. */
+/**
+ * `normalise_chapters`: every chapter of every chapter-list group.
+ *
+ * The extra-chapter numbers are worked out across the groups joined together,
+ * in list order. MangaPlus splits a title's chapters into a "first", "mid" and
+ * "last" list per group and can start a group with an `ex`, whose anchor is
+ * then the last chapter of the previous group — invisible to anything looking
+ * at one group alone.
+ */
 export function normaliseChapters(
   groups: readonly RawChapter[][],
   options: OverrideOptions,
   numberWords: string | null,
 ): RawChapter[] {
+  const ordered = groups.flat();
+  const assignment = buildExtraAssignment(ordered, options);
+
   const normalised: RawChapter[] = [];
   for (const chapters of groups) {
     for (const chapter of chapters) {
-      normalised.push(...normaliseChapterFields(chapters, chapter, options, numberWords));
+      normalised.push(
+        ...normaliseChapterFields(chapters, chapter, options, numberWords, assignment),
+      );
     }
   }
   return normalised;
