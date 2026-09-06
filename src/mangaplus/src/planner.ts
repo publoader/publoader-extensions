@@ -56,6 +56,13 @@ export interface PlanInput {
   trackedSubset: readonly string[] | null;
   /** A clean run must fetch everything; see `planFetch`. */
   cleanRun: boolean;
+  /**
+   * Which run this is. `FORCE` is an operator overriding the very evidence the
+   * skip predicates are built on, so it fetches every candidate; see
+   * `planFetch`. Optional: under a runner that does not send it, every run
+   * behaves as it did before.
+   */
+  kind?: "UPDATE" | "FORCE" | "CLEAN" | undefined;
   /** Chapter ids already uploaded for this extension. */
   postedChapterIds: ReadonlySet<string>;
   /** External manga id -> what the listings said. */
@@ -151,11 +158,25 @@ function skipReason(
  * Split the tracked catalogue into the titles worth a detail call and the
  * titles whose listing evidence rules out an update.
  *
- * Clean runs fetch every candidate unconditionally. That is a correctness
- * requirement, not politeness: a clean run's `allChapters` is what the
- * platform diffs to detect *removed* chapters, and a title missing from it
- * reads as "everything was removed". The same applies when no update feed
- * answered — with no listing to trust, absence proves nothing.
+ * Three of the four ways out of the skipping are already here, and they are
+ * different claims:
+ *
+ *  - Clean runs fetch every candidate unconditionally. That is a correctness
+ *    requirement, not politeness: a clean run's `allChapters` is what the
+ *    platform diffs to detect *removed* chapters, and a title missing from it
+ *    reads as "everything was removed".
+ *  - The same applies when no update feed answered — with no listing to trust,
+ *    absence proves nothing.
+ *  - A FORCE run is an operator saying "fetch these now". Every predicate below
+ *    is an inference from the publisher's update signal, and that signal is
+ *    precisely what they are overruling: the reason to force a run is almost
+ *    always a series the feed is quiet about, most often one just mapped whose
+ *    last chapter is months old. Skipping it there means the run fetches
+ *    nothing and reports success, which is worse than slow.
+ *
+ * Narrowing is not skipping and is deliberately left in place for all three:
+ * `candidates` is already down to this job's own series, and a forced run over
+ * one named series stays one series' worth of requests.
  */
 export function planFetch(input: PlanInput): FetchPlan {
   const candidates = candidateIds(input.tracked, input.trackedSubset);
@@ -164,7 +185,7 @@ export function planFetch(input: PlanInput): FetchPlan {
     number
   >;
 
-  if (input.cleanRun || !input.updateFeedsAvailable) {
+  if (input.cleanRun || input.kind === "FORCE" || !input.updateFeedsAvailable) {
     return {
       fetch: candidates,
       skipped: [],

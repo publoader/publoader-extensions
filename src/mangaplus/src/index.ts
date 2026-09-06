@@ -234,6 +234,7 @@ class MangaPlus implements ExtensionRuntime {
       tracked,
       trackedSubset: input.trackedSubset,
       cleanRun: input.cleanRun,
+      kind: input.kind,
       postedChapterIds,
       listing: listing.entries,
       updateFeedsAvailable: listing.updateFeedsAvailable,

@@ -43,9 +43,21 @@ export interface CollectResult {
 export interface CollectInput {
   /** Chapter ids already uploaded for this extension (empty on clean runs). */
   postedChapterIds: readonly string[];
-  /** Clean run: return the full catalogue in allChapters. */
+  /** Clean run: return the full catalogue in allChapters. Same as kind === "CLEAN". */
   cleanRun: boolean;
-  /** One segment of a partitioned run: fetch only these external manga ids. */
+  /**
+   * Which run this is, and so how much licence there is to skip a title:
+   * UPDATE is the scheduled pass and may skip on the publisher's update signal;
+   * FORCE is an operator overriding that signal, so every candidate is fetched;
+   * CLEAN fetches everything and returns allChapters.
+   *
+   * Optional: absent under a runner older than the field, which reads as UPDATE.
+   */
+  kind?: "UPDATE" | "FORCE" | "CLEAN" | undefined;
+  /**
+   * Fetch only these external manga ids: one segment of a partitioned run, or
+   * the series an operator named on a scoped run.
+   */
   trackedSubset: readonly string[] | null;
 }
 
