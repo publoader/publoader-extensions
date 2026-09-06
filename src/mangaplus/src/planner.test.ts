@@ -48,6 +48,62 @@ test("a title whose latest listed chapter is already posted is skipped", () => {
   assert.equal(result.full, false);
 });
 
+/*
+ * A forced run is an operator overruling the update signal, so none of the
+ * predicates above may veto a title. The case this exists for: a series mapped
+ * today whose last chapter came out months ago. Every window predicate skips
+ * it, the run finishes green having fetched nothing, and the series stays
+ * unpublished with no error to explain it.
+ */
+test("a FORCE run fetches a title every predicate would otherwise skip", () => {
+  const listing = new Map<string, ListingEntry>([
+    ["100", { latestChapterId: "9001", latestChapterTimestamp: ANCIENT, inCatalogue: true }],
+  ]);
+
+  const scheduled = plan({
+    tracked: ["100"],
+    postedChapterIds: new Set(["9001"]),
+    listing,
+  });
+  assert.deepEqual(scheduled.fetch, []);
+
+  const forced = plan({
+    tracked: ["100"],
+    kind: "FORCE",
+    postedChapterIds: new Set(["9001"]),
+    listing,
+  });
+  assert.deepEqual(forced.fetch, ["100"]);
+  assert.deepEqual(forced.skipped, []);
+  assert.equal(forced.full, true);
+});
+
+test("a FORCE run is still narrowed to the series the operator named", () => {
+  // Overriding the update signal is not the same as widening the scope: the
+  // whole point of a scoped force is that it costs one series, not the
+  // catalogue.
+  const result = plan({
+    tracked: ["100", "200", "300"],
+    trackedSubset: ["200"],
+    kind: "FORCE",
+    listing: new Map<string, ListingEntry>(),
+  });
+
+  assert.deepEqual(result.fetch, ["200"]);
+  assert.equal(result.candidates, 1);
+});
+
+test("an UPDATE run is unchanged by the new field being absent", () => {
+  // Every published bundle predates `kind`; undefined must read as UPDATE.
+  const result = plan({
+    tracked: ["100"],
+    listing: new Map<string, ListingEntry>([
+      ["100", { latestChapterId: "9002", latestChapterTimestamp: RECENT, inCatalogue: true }],
+    ]),
+  });
+  assert.deepEqual(result.fetch, ["100"]);
+});
+
 test("a title with a new latest chapter is fetched", () => {
   const result = plan({
     tracked: ["100"],
