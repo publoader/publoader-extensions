@@ -10,6 +10,9 @@
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": false,
     "isolatedModules": true,
+    // `normalise.ts` imports `./extras.ts` by its real filename: it is reached
+    // by `node --test`, which runs the sources as-is and resolves nothing.
+    "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

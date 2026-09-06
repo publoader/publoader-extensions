@@ -38,6 +38,19 @@ export interface CollectResult {
   /** Full current catalogue; required on clean runs, null otherwise. */
   allChapters: ChapterInput[] | null;
   untrackedManga: MangaInput[];
+  /**
+   * External manga ids this run could not fetch, and therefore knows nothing
+   * about.
+   *
+   * A title absent from `allChapters` is read by the platform as "the publisher
+   * has nothing here any more", so a series that merely failed to load must be
+   * named here rather than quietly omitted — omitting it unpublishes its whole
+   * back catalogue on MangaDex. Listing it means "no information", and the
+   * removal pass is skipped for that title alone.
+   *
+   * Optional: an extension that never reports failures behaves as before.
+   */
+  failedManga?: string[];
 }
 
 export interface CollectInput {
@@ -63,6 +76,16 @@ export interface CollectInput {
 
 export interface ExtensionContext {
   readonly manifest: Readonly<Record<string, unknown>>;
+  /**
+   * The extension's configuration as the DATABASE holds it — what the dashboard
+   * edits, rather than what the bundle shipped with.
+   *
+   * Optional because an older runner does not send it, and an absent field must
+   * not be mistaken for an empty configuration. The two are not merged for you:
+   * how the database's copy relates to the bundled one is the extension's
+   * decision to make explicitly.
+   */
+  readonly overrideOptions?: Readonly<Record<string, unknown>>;
   /** External manga id -> MangaDex title id, DB-authoritative. */
   readonly mangaIdMap: ReadonlyMap<string, string>;
   /** The only sanctioned network primitive; enforces manifest allowed_hosts. */

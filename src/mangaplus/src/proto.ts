@@ -433,8 +433,37 @@ export interface PbUpdatedTitle {
   updatedTimeStamp?: string | number;
 }
 
+/** One image of a chapter, as `manga_viewer` returns it. */
+export interface PbMangaPage {
+  imageUrl?: string;
+  width?: number;
+  height?: number;
+  /**
+   * Repeating-key XOR key, as hex. Absent on the quality this extension
+   * requests — those pages arrive as ordinary JPEGs — but still set on others,
+   * so `decryptImage` handles both.
+   */
+  encryptionKey?: string;
+}
+
+/**
+ * One entry of `MangaViewer.pages`. The array also carries advertisement and
+ * "last page" entries under field numbers this schema does not declare, so an
+ * entry with no `mangaPage` is deliberately possible and is not a manga page.
+ */
+export interface PbPage {
+  mangaPage?: PbMangaPage;
+}
+
+export interface PbMangaViewer {
+  pages?: PbPage[];
+  chapterId?: number;
+  titleId?: number;
+}
+
 export interface PbSuccessResult {
   titleDetailView?: PbTitleDetailView;
+  mangaViewer?: PbMangaViewer;
   allTitlesViewV2?: { allTitlesGroup?: PbAllTitlesGroup[] };
   titleUpdatedView?: { latestTitle?: PbUpdatedTitle[] };
   webHomeViewV4?: { groups?: PbWebHomeGroup[] };

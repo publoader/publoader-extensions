@@ -71,11 +71,11 @@ newer timestamp, the feeds disagree and the series is fetched.
   treated as no evidence rather than as "nothing to do": the run logs it and
   fetches every tracked series. MangaPlus publishes daily, so a genuinely empty
   update feed is not a thing.
-- **`"ex"` numbering keeps its full context.** `normalise.ts` numbers an `"ex"`
-  chapter by inspecting its neighbours in the same chapter-list group, so it
-  needs the series' whole chapter list. A series is never fetched *partially* —
-  a title either gets its complete `title_detailV3` response or no call at all
-  — so whenever any of its chapters are new, every neighbour is present.
+- **`"ex"` numbering keeps its full context.** `extras.ts` numbers an `"ex"`
+  chapter from its neighbours across the series' whole chapter list, so it
+  needs all of it. A series is never fetched *partially* — a title either gets
+  its complete `title_detailV3` response or no call at all — so whenever any of
+  its chapters are new, every neighbour is present.
 - **Partitioned runs.** `input.trackedSubset` narrows the candidate set before
   any predicate runs, so a segment only ever fetches series it owns.
   Untracked-series detection still tests membership against the *whole* tracked
@@ -99,9 +99,36 @@ An operator wanting a full catalogue re-scan should therefore trigger a
 and prunes the same way.
 
 Chapter numbers and titles are normalised in `src/normalise.ts`
-(`"#001"` → `"1"`, `"ex"` → `"<previous>.5"`, `"Chapter 12: Foo"` → `"Foo"`),
-driven by `override_options.json`. Both JSON data files are read through
-`ctx.dataFile` and also seed the platform database.
+(`"#001"` → `"1"`, `"Chapter 12: Foo"` → `"Foo"`), driven by
+`override_options.json`. Both JSON data files are read through `ctx.dataFile`
+and also seed the platform database.
+
+### Numbering extra chapters
+
+MangaPlus numbers an extra chapter `"ex"` and lets its position in the list say
+where it belongs; MangaDex needs an actual number. `src/extras.ts` infers one,
+under three rules, in this order:
+
+1. **Order.** A run of extras between the same two chapters comes out
+   ascending: `10, ex, ex, 11` → `10.5, 10.6`.
+2. **No collisions.** The number is never one the series already uses:
+   `11, 11.5, ex` → `11.6`, and `10, ex, 10.5` → `10.1`.
+3. **Stability.** An extra is uploaded the day it appears, while it is still
+   the newest chapter in the list, so it is anchored to the chapter *before*
+   it — which cannot change afterwards. `10, ex` is `10.5` and stays `10.5`
+   when chapter 11 arrives.
+
+Each run of extras is placed in the open interval between the numbered chapter
+before it and the next one above that, climbing the conventional `.5, .6, .7`
+ladder and subdividing the gap only when the ladder does not fit. A run before
+the first numbered chapter hangs below it, right-aligned, so the extra next to
+chapter 1 is always `0.5`. Where no number can be placed — a series with
+nothing numbered at all — the chapter is left unnumbered rather than given a
+wrong number.
+
+`"ex"`, `"EX."`, `"#ex"` and `"extra 2"` are all recognised. Other spellings
+are added through `extra_markers` in `override_options.json` without a code
+change, and `override_chapter_numbers` still overrides the inference outright.
 
 ## Build
 
