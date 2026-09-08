@@ -38,6 +38,7 @@ import {
   type PbTitle,
 } from "./proto";
 import {
+  hasExpired,
   normaliseChapters,
   numberWordsPattern,
   type OverrideOptions,
@@ -187,7 +188,7 @@ function isoFromEpoch(seconds: number): string | null {
 function toChapterInput(chapter: RawChapter): ChapterInput {
   return {
     chapterTimestamp: isoFromEpoch(chapter.chapterTimestamp),
-    chapterExpire: isoFromEpoch(chapter.chapterExpire),
+    chapterExpire: chapter.chapterExpire === null ? null : isoFromEpoch(chapter.chapterExpire),
     chapterLanguage: chapter.chapterLanguage,
     chapterNumber: chapter.chapterNumber,
     chapterTitle: chapter.chapterTitle,
@@ -310,7 +311,7 @@ class MangaPlus implements ExtensionRuntime {
         // MangaPlus rotates free chapters out; anything already expired, or
         // older than the update window, is not a new upload.
         if (postedChapterIds.has(chapter.chapterId)) continue;
-        if (chapter.chapterExpire < now) continue;
+        if (hasExpired(chapter.chapterExpire, now)) continue;
         if (chapter.chapterTimestamp < now - UPDATE_WINDOW_SECONDS) continue;
         updatedChapters.push(chapter);
       }
@@ -880,7 +881,14 @@ class MangaPlus implements ExtensionRuntime {
         chapterId,
         chapterUrl: CHAPTER_URL(chapterId),
         chapterTimestamp: chapter.startTimeStamp ?? DEFAULT_TIMESTAMP,
-        chapterExpire: chapter.endTimeStamp ?? DEFAULT_TIMESTAMP,
+        // null, NOT DEFAULT_TIMESTAMP: a missing endTimeStamp means "no expiry
+        // known", and proto3 drops zero values, so a chapter that never expires
+        // arrives here with the field absent. Standing that in as epoch second
+        // 1 reads as "expired in 1970" — which skipped the chapter from every
+        // upload below, and now that the platform deletes still-listed expired
+        // chapters as paywalled, would delete exactly the chapters that are
+        // free forever. Unknown has to stay unknown.
+        chapterExpire: chapter.endTimeStamp ?? null,
         chapterTitle: chapter.subTitle ?? null,
         chapterNumber: chapter.name ?? null,
         chapterLanguage: manga.language,
