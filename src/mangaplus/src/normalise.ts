@@ -38,7 +38,8 @@ export interface RawChapter {
   listSlot?: "first" | "mid" | "last";
   chapterUrl: string;
   chapterTimestamp: number;
-  chapterExpire: number;
+  /** null when the publisher states no expiry, i.e. the chapter stays free. */
+  chapterExpire: number | null;
   chapterTitle: string | null;
   chapterNumber: string | null;
   chapterLanguage: string;
@@ -80,6 +81,22 @@ export interface OverrideOptions {
    * make deliberately rather than a default to inherit.
    */
   verify_pages?: boolean;
+}
+
+/**
+ * Has the publisher's free window closed?
+ *
+ * Only a stated expiry can close it. A null expiry means MANGA Plus named no
+ * end date — proto3 drops zero values, so a chapter that never rotates out
+ * arrives with the field absent — and "unknown" must not read as "expired".
+ * Getting this backwards skips the chapter from every upload, and, because the
+ * platform now hard-deletes still-listed expired chapters as paywalled, would
+ * delete the chapters that are free forever.
+ *
+ * Both arguments are epoch SECONDS, matching the wire format.
+ */
+export function hasExpired(expire: number | null, now: number): boolean {
+  return expire !== null && expire < now;
 }
 
 /** publoader's chapter-number validator (utils/utils.py). */
