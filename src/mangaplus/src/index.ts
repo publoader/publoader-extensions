@@ -60,6 +60,9 @@ const CHAPTER_URL = (chapterId: string) =>
   `https://mangaplus.shueisha.co.jp/viewer/${chapterId}`;
 const MANGA_URL = (mangaId: string) => `https://mangaplus.shueisha.co.jp/titles/${mangaId}`;
 
+/** What MangaPlus calls the tier that unlocks a subscriber-only chapter. */
+const SUBSCRIPTION_NAME = "MANGA Plus MAX";
+
 /** Stand-in for a missing timestamp, matching the Python DEFAULT_TIMESTAMP. */
 const DEFAULT_TIMESTAMP = 1;
 /** An update is only "new" if it went up within this window. */
@@ -189,6 +192,10 @@ function toChapterInput(chapter: RawChapter): ChapterInput {
   return {
     chapterTimestamp: isoFromEpoch(chapter.chapterTimestamp),
     chapterExpire: chapter.chapterExpire === null ? null : isoFromEpoch(chapter.chapterExpire),
+    // Null for a readable chapter; set, the platform publishes it already
+    // carded and names the subscription that unlocks it.
+    unavailableReason: chapter.unavailableReason ?? null,
+    subscriptionName: chapter.subscriptionName ?? null,
     chapterLanguage: chapter.chapterLanguage,
     chapterNumber: chapter.chapterNumber,
     chapterTitle: chapter.chapterTitle,
@@ -339,10 +346,19 @@ class MangaPlus implements ExtensionRuntime {
       });
     }
 
+    // A dead chapter is LABELLED, not dropped. MangaPlus still lists it and a
+    // MANGA Plus MAX subscriber can still open it -- what the viewer refuses is
+    // the logged-out request this extension makes. Dropping it is
+    // indistinguishable, from the platform's side, from MangaPlus deleting the
+    // chapter, so the removal pass cards it "removed" and tells a reader a
+    // chapter they could subscribe to read no longer exists.
     const dead = await this.findDeadChapters(input, allChapters, updatedChapters);
-    const isDead = (chapter: RawChapter): boolean => dead.has(chapter.chapterId);
-    const liveUpdated = updatedChapters.filter((chapter) => !isDead(chapter));
-    const liveAll = allChapters.filter((chapter) => !isDead(chapter));
+    const label = (chapter: RawChapter): RawChapter =>
+      dead.has(chapter.chapterId)
+        ? { ...chapter, unavailableReason: "subscriber-only", subscriptionName: SUBSCRIPTION_NAME }
+        : chapter;
+    const liveUpdated = updatedChapters.map(label);
+    const liveAll = allChapters.map(label);
 
     // Every fetched series failing is the API refusing us, not a catalogue that
     // emptied itself. Publishing that as a clean run's catalogue would claim

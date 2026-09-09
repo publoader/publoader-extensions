@@ -23,6 +23,17 @@ export interface ChapterInput {
   mdMangaId: string | null;
   mangaName: string | null;
   mangaUrl: string | null;
+  /**
+   * Why an ordinary reader cannot open this chapter, when they cannot.
+   *
+   * Null (or omitted) means freely readable and the chapter is published
+   * normally. Anything else means the publisher still lists it but will not
+   * serve it to a logged-out reader, and the platform publishes it already
+   * carded with wording that says so.
+   */
+  unavailableReason?: "subscriber-only" | "region-locked" | "removed" | null;
+  /** The tier a `subscriber-only` chapter needs, e.g. "MANGA Plus MAX". */
+  subscriptionName?: string | null;
   images?: Uint8Array[];
 }
 

@@ -46,6 +46,14 @@ export interface RawChapter {
   mangaId: string;
   mangaName: string | null;
   mangaUrl: string;
+  /**
+   * Why a reader cannot open this chapter, when they cannot. Null for a normal
+   * chapter; `subscriber-only` for one the viewer refuses a logged-out request
+   * for but a MANGA Plus MAX subscriber can still read.
+   */
+  unavailableReason?: "subscriber-only" | null;
+  /** The tier that unlocks it, carried onto the card. */
+  subscriptionName?: string | null;
 }
 
 export interface OverrideOptions {
